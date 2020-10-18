@@ -137,6 +137,11 @@ type kubeGenericRuntimeManager struct {
 
 	// Cache last per-container error message to reduce log spam
 	logReduction *logreduction.LogReduction
+
+	//Service switch and flags
+	podSwitch bool
+	containerSwitch bool
+	services *SockRecord
 }
 
 // KubeGenericRuntime is a interface contains interfaces for container runtime and command.
@@ -196,6 +201,9 @@ func NewKubeGenericRuntimeManager(
 		logManager:          logManager,
 		runtimeClassManager: runtimeClassManager,
 		logReduction:        logreduction.NewLogReduction(identicalErrorDelay),
+		podSwitch:           false,
+		containerSwitch:     false,
+		services:            NewSockRecord(),
 	}
 
 	typedVersion, err := kubeRuntimeManager.runtimeService.Version(kubeRuntimeAPIVersion)
