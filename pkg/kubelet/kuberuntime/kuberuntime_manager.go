@@ -137,6 +137,11 @@ type kubeGenericRuntimeManager struct {
 
 	// Cache last per-container error message to reduce log spam
 	logReduction *logreduction.LogReduction
+
+	//Service switch and flags
+	podSwitch       bool
+	containerSwitch bool
+	services        *SockRecord
 }
 
 // KubeGenericRuntime is a interface contains interfaces for container runtime and command.
@@ -196,7 +201,19 @@ func NewKubeGenericRuntimeManager(
 		logManager:          logManager,
 		runtimeClassManager: runtimeClassManager,
 		logReduction:        logreduction.NewLogReduction(identicalErrorDelay),
+		podSwitch:           false,
+		containerSwitch:     false,
+		services:            NewSockRecord(),
 	}
+	klog.Infof("NewKubeGenericRuntimeManager:ImagePullerDetail create!")
+	detail := ImagePullerDetail{
+		recorder:     kubecontainer.FilterEventRecorder(recorder),
+		imageBackOff: imageBackOff,
+		serialized:   serializeImagePulls,
+		qps:          imagePullQPS,
+		burst:        imagePullBurst,
+	}
+	kubeRuntimeManager.services.ImageDetail = detail
 
 	typedVersion, err := kubeRuntimeManager.runtimeService.Version(kubeRuntimeAPIVersion)
 	if err != nil {
@@ -653,6 +670,57 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 //  6. Create init containers.
 //  7. Create normal containers.
 func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, podStatus *kubecontainer.PodStatus, pullSecrets []v1.Secret, backOff *flowcontrol.Backoff) (result kubecontainer.PodSyncResult) {
+	//preprocess runtime label
+	m.podSwitch = false
+	orinRuntime, orinImage := m.runtimeService, m.imageService
+	orinImagePuller := m.imagePuller
+	runtimeName, runtimeLabelUse := GetV1PodLabelWithName(pod)
+	defer func() {
+		if m.podSwitch {
+			m.runtimeService, m.imageService = orinRuntime, orinImage
+			m.imagePuller = orinImagePuller
+		}
+	}()
+	if runtimeLabelUse {
+		klog.Infof("SyncPod:runtime label:%s!", runtimeName)
+		runtimeServiceExist := m.services.IsExistedService(runtimeName)
+		if runtimeServiceExist {
+			klog.Infof("SyncPod:runtime service exists!")
+			services := m.services
+			period := services.Period
+			services.HealthRestart(period)
+			targetRuntimeService, runtimeErr := m.services.WrapRuntime(runtimeName)
+			if !runtimeErr {
+				klog.Infof("SyncPod:runtime wrap err")
+			} else {
+				klog.Infof("SyncPod:runtime wrap return")
+			}
+			targetImageService, imageErr := m.services.WrapImage(runtimeName)
+			if !imageErr {
+				klog.Infof("SyncPod:image wrap err")
+			} else {
+				klog.Infof("SyncPod:image wrap return")
+			}
+			if runtimeErr && imageErr {
+				klog.Infof("SyncPod:Both services wrap!")
+				recorder, imageBackOff, serializeImagePulls, imagePullQPS, imagePullBurst := m.services.GetImagePullerDetail()
+				m.runtimeService, m.imageService = targetRuntimeService, targetImageService
+				m.imagePuller = images.NewImageManager(
+					recorder,
+					m,
+					imageBackOff,
+					serializeImagePulls,
+					imagePullQPS,
+					imagePullBurst)
+				m.podSwitch = true
+				klog.Infof("SyncPod:Arg are replace!")
+			} else {
+				klog.Infof("SyncPod:Arg aren't replace!")
+			}
+		}
+	} else {
+		klog.Infof("SyncPod:Runtime label doesn't exist!")
+	}
 	// Step 1: Compute sandbox and container changes.
 	podContainerChanges := m.computePodActions(pod, podStatus)
 	klog.V(3).Infof("computePodActions got %+v for pod %q", podContainerChanges, format.Pod(pod))
