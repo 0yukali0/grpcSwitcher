@@ -22,7 +22,7 @@ import (
 	"net/url"
 	"sort"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	kubetypes "k8s.io/apimachinery/pkg/types"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
@@ -61,8 +61,12 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(pod *v1.Pod, attempt uint32
 			klog.V(2).Infof("Running pod %s with RuntimeHandler %q", format.Pod(pod), runtimeHandler)
 		}
 	}
-
-	podSandBoxID, err := m.runtimeService.RunPodSandbox(podSandboxConfig, runtimeHandler)
+	var podSandBoxID string
+	if m.Services.PodSwitch {
+		podSandBoxID, err = m.Services.TargetRuntime.RunPodSandbox(podSandboxConfig, runtimeHandler)
+	} else {
+		podSandBoxID, err = m.runtimeService.RunPodSandbox(podSandboxConfig, runtimeHandler)
+	}
 	if err != nil {
 		message := fmt.Sprintf("CreatePodSandbox for pod %q failed: %v", format.Pod(pod), err)
 		klog.Error(message)

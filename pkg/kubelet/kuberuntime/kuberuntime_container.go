@@ -124,8 +124,12 @@ func (m *kubeGenericRuntimeManager) startContainer(podSandboxID string, podSandb
 		m.recordContainerEvent(pod, container, "", v1.EventTypeWarning, events.FailedToCreateContainer, "Error: %v", s.Message())
 		return s.Message(), ErrCreateContainerConfig
 	}
-
-	containerID, err := m.runtimeService.CreateContainer(podSandboxID, containerConfig, podSandboxConfig)
+	var containerID string
+	if m.Services.PodSwitch {
+		containerID, err = m.Services.TargetRuntime.CreateContainer(podSandboxID, containerConfig, podSandboxConfig)
+	} else {
+		containerID, err = m.runtimeService.CreateContainer(podSandboxID, containerConfig, podSandboxConfig)
+	}
 	if err != nil {
 		s, _ := grpcstatus.FromError(err)
 		m.recordContainerEvent(pod, container, containerID, v1.EventTypeWarning, events.FailedToCreateContainer, "Error: %v", s.Message())
@@ -147,7 +151,11 @@ func (m *kubeGenericRuntimeManager) startContainer(podSandboxID string, podSandb
 	}
 
 	// Step 3: start the container.
-	err = m.runtimeService.StartContainer(containerID)
+	if m.Services.PodSwitch {
+		err = m.Services.TargetRuntime.StartContainer(containerID)
+	} else {
+		err = m.runtimeService.StartContainer(containerID)
+	}
 	if err != nil {
 		s, _ := grpcstatus.FromError(err)
 		m.recordContainerEvent(pod, container, containerID, v1.EventTypeWarning, events.FailedToStartContainer, "Error: %v", s.Message())
@@ -512,8 +520,14 @@ func (m *kubeGenericRuntimeManager) executePreStopHook(pod *v1.Pod, containerID 
 // just pass the needed function not create the fake object.
 func (m *kubeGenericRuntimeManager) restoreSpecsFromContainerLabels(containerID kubecontainer.ContainerID) (*v1.Pod, *v1.Container, error) {
 	var pod *v1.Pod
+	var s *runtimeapi.ContainerStatus
 	var container *v1.Container
-	s, err := m.runtimeService.ContainerStatus(containerID.ID)
+	var err error
+	if m.Services.PodSwitch {
+		s, err = m.Services.TargetRuntime.ContainerStatus(containerID.ID)
+	} else {
+		s, err = m.runtimeService.ContainerStatus(containerID.ID)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -598,8 +612,12 @@ func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubec
 	}
 
 	klog.V(2).Infof("Killing container %q with %d second grace period", containerID.String(), gracePeriod)
-
-	err := m.runtimeService.StopContainer(containerID.ID, gracePeriod)
+	var err error
+	if m.Services.PodSwitch {
+		err = m.Services.TargetRuntime.StopContainer(containerID.ID, gracePeriod)
+	} else {
+		err = m.runtimeService.StopContainer(containerID.ID, gracePeriod)
+	}
 	if err != nil {
 		klog.Errorf("Container %q termination failed with gracePeriod %d: %v", containerID.String(), gracePeriod, err)
 	} else {
@@ -760,7 +778,12 @@ func findNextInitContainerToRun(pod *v1.Pod, podStatus *kubecontainer.PodStatus)
 
 // GetContainerLogs returns logs of a specific container.
 func (m *kubeGenericRuntimeManager) GetContainerLogs(ctx context.Context, pod *v1.Pod, containerID kubecontainer.ContainerID, logOptions *v1.PodLogOptions, stdout, stderr io.Writer) (err error) {
-	status, err := m.runtimeService.ContainerStatus(containerID.ID)
+	var status *runtimeapi.ContainerStatus
+	if m.Services.PodSwitch {
+		status, err = m.Services.TargetRuntime.ContainerStatus(containerID.ID)
+	} else {
+		status, err = m.runtimeService.ContainerStatus(containerID.ID)
+	}
 	if err != nil {
 		klog.V(4).Infof("failed to get container status for %v: %v", containerID.String(), err)
 		return fmt.Errorf("unable to retrieve container logs for %v", containerID.String())
@@ -830,7 +853,13 @@ func (m *kubeGenericRuntimeManager) removeContainer(containerID string) error {
 		return err
 	}
 	// Remove the container.
-	return m.runtimeService.RemoveContainer(containerID)
+	var err error
+	if m.Services.PodSwitch {
+		err = m.Services.TargetRuntime.RemoveContainer(containerID)
+	} else {
+		err = m.runtimeService.RemoveContainer(containerID)
+	}
+	return err
 }
 
 // removeContainerLog removes the container log.
@@ -840,8 +869,12 @@ func (m *kubeGenericRuntimeManager) removeContainerLog(containerID string) error
 	if err != nil {
 		return err
 	}
-
-	status, err := m.runtimeService.ContainerStatus(containerID)
+	var status *runtimeapi.ContainerStatus
+	if m.Services.PodSwitch {
+		status, err = m.Services.TargetRuntime.ContainerStatus(containerID)
+	} else {
+		status, err = m.runtimeService.ContainerStatus(containerID)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get container status %q: %v", containerID, err)
 	}

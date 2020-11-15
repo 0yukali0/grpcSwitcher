@@ -48,6 +48,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/logs"
 	proberesults "k8s.io/kubernetes/pkg/kubelet/prober/results"
 	"k8s.io/kubernetes/pkg/kubelet/runtimeclass"
+	"k8s.io/kubernetes/pkg/kubelet/servicerecord"
 	"k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/kubernetes/pkg/kubelet/util/cache"
 	"k8s.io/kubernetes/pkg/kubelet/util/format"
@@ -139,9 +140,7 @@ type kubeGenericRuntimeManager struct {
 	logReduction *logreduction.LogReduction
 
 	//Service switch and flags
-	podSwitch       bool
-	containerSwitch bool
-	services        *SockRecord
+	Services *servicerecord.SockRecord
 }
 
 // KubeGenericRuntime is a interface contains interfaces for container runtime and command.
@@ -201,19 +200,17 @@ func NewKubeGenericRuntimeManager(
 		logManager:          logManager,
 		runtimeClassManager: runtimeClassManager,
 		logReduction:        logreduction.NewLogReduction(identicalErrorDelay),
-		podSwitch:           false,
-		containerSwitch:     false,
-		services:            NewSockRecord(),
+		Services:            servicerecord.NewSockRecord(),
 	}
 	klog.Infof("NewKubeGenericRuntimeManager:ImagePullerDetail create!")
-	detail := ImagePullerDetail{
-		recorder:     kubecontainer.FilterEventRecorder(recorder),
-		imageBackOff: imageBackOff,
-		serialized:   serializeImagePulls,
-		qps:          imagePullQPS,
-		burst:        imagePullBurst,
+	detail := servicerecord.ImagePullerDetail{
+		Recorder:     kubecontainer.FilterEventRecorder(recorder),
+		ImageBackOff: imageBackOff,
+		Serialized:   serializeImagePulls,
+		RequestQPS:   imagePullQPS,
+		Burst:        imagePullBurst,
 	}
-	kubeRuntimeManager.services.ImageDetail = detail
+	kubeRuntimeManager.Services.ImageDetail = detail
 
 	typedVersion, err := kubeRuntimeManager.runtimeService.Version(kubeRuntimeAPIVersion)
 	if err != nil {
@@ -244,7 +241,6 @@ func NewKubeGenericRuntimeManager(
 			klog.Errorf("Failed to create directory %q: %v", podLogsRootDirectory, err)
 		}
 	}
-
 	kubeRuntimeManager.imagePuller = images.NewImageManager(
 		kubecontainer.FilterEventRecorder(recorder),
 		kubeRuntimeManager,
@@ -670,57 +666,13 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 //  6. Create init containers.
 //  7. Create normal containers.
 func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, podStatus *kubecontainer.PodStatus, pullSecrets []v1.Secret, backOff *flowcontrol.Backoff) (result kubecontainer.PodSyncResult) {
-	//preprocess runtime label
-	m.podSwitch = false
-	orinRuntime, orinImage := m.runtimeService, m.imageService
-	orinImagePuller := m.imagePuller
-	runtimeName, runtimeLabelUse := GetV1PodLabelWithName(pod)
-	defer func() {
-		if m.podSwitch {
-			m.runtimeService, m.imageService = orinRuntime, orinImage
-			m.imagePuller = orinImagePuller
-		}
-	}()
-	if runtimeLabelUse {
-		klog.Infof("SyncPod:runtime label:%s!", runtimeName)
-		runtimeServiceExist := m.services.IsExistedService(runtimeName)
-		if runtimeServiceExist {
-			klog.Infof("SyncPod:runtime service exists!")
-			services := m.services
-			period := services.Period
-			services.HealthRestart(period)
-			targetRuntimeService, runtimeErr := m.services.WrapRuntime(runtimeName)
-			if !runtimeErr {
-				klog.Infof("SyncPod:runtime wrap err")
-			} else {
-				klog.Infof("SyncPod:runtime wrap return")
-			}
-			targetImageService, imageErr := m.services.WrapImage(runtimeName)
-			if !imageErr {
-				klog.Infof("SyncPod:image wrap err")
-			} else {
-				klog.Infof("SyncPod:image wrap return")
-			}
-			if runtimeErr && imageErr {
-				klog.Infof("SyncPod:Both services wrap!")
-				recorder, imageBackOff, serializeImagePulls, imagePullQPS, imagePullBurst := m.services.GetImagePullerDetail()
-				m.runtimeService, m.imageService = targetRuntimeService, targetImageService
-				m.imagePuller = images.NewImageManager(
-					recorder,
-					m,
-					imageBackOff,
-					serializeImagePulls,
-					imagePullQPS,
-					imagePullBurst)
-				m.podSwitch = true
-				klog.Infof("SyncPod:Arg are replace!")
-			} else {
-				klog.Infof("SyncPod:Arg aren't replace!")
-			}
-		}
-	} else {
-		klog.Infof("SyncPod:Runtime label doesn't exist!")
+	m.Services.PreCheck(pod)
+	if m.Services.PodSwitch {
+		runtimeName := m.Services.TargetRuntimeName
+		m.Services.TargetRuntime = newInstrumentedRuntimeService(m.Services.Service[runtimeName].Runtime)
+		m.Services.TargetImage = newInstrumentedImageManagerService(m.Services.Service[runtimeName].Image)
 	}
+	defer m.Services.SwitchReset()
 	// Step 1: Compute sandbox and container changes.
 	podContainerChanges := m.computePodActions(pod, podStatus)
 	klog.V(3).Infof("computePodActions got %+v for pod %q", podContainerChanges, format.Pod(pod))
@@ -810,7 +762,15 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, podStatus *kubecontaine
 		}
 		klog.V(4).Infof("Created PodSandbox %q for pod %q", podSandboxID, format.Pod(pod))
 
-		podSandboxStatus, err := m.runtimeService.PodSandboxStatus(podSandboxID)
+		if m.Services.PodSwitch {
+
+		}
+		var podSandboxStatus *runtimeapi.PodSandboxStatus
+		if m.Services.PodSwitch {
+			podSandboxStatus, err = m.Services.TargetRuntime.PodSandboxStatus(podSandboxID)
+		} else {
+			podSandboxStatus, err = m.runtimeService.PodSandboxStatus(podSandboxID)
+		}
 		if err != nil {
 			ref, referr := ref.GetReference(legacyscheme.Scheme, pod)
 			if referr != nil {
