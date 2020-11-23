@@ -64,6 +64,9 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(pod *v1.Pod, attempt uint32
 	var podSandBoxID string
 	if m.Services.PodSwitch {
 		podSandBoxID, err = m.Services.TargetRuntime.RunPodSandbox(podSandboxConfig, runtimeHandler)
+		if err == nil {
+			m.Services.SidOfRuntime[podSandBoxID] = m.Services.TargetRuntimeName
+		}
 	} else {
 		podSandBoxID, err = m.runtimeService.RunPodSandbox(podSandboxConfig, runtimeHandler)
 	}
@@ -72,7 +75,6 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(pod *v1.Pod, attempt uint32
 		klog.Error(message)
 		return "", message, err
 	}
-
 	return podSandBoxID, "", nil
 }
 

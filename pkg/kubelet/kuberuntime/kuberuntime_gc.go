@@ -166,6 +166,34 @@ func (cgc *containerGC) removeSandbox(sandboxID string) {
 	// In normal cases, kubelet should've already called StopPodSandbox before
 	// GC kicks in. To guard against the rare cases where this is not true, try
 	// stopping the sandbox before removing it.
+	TargetRuntimeName, PodSwitch := cgc.manager.Services.SidOfRuntime[sandboxID]
+	if PodSwitch {
+		if TargetRuntimeName == cgc.manager.Services.TargetRuntimeName {
+			klog.Infof("removeSandbox:PodSwitch of %s work", TargetRuntimeName)
+			if err := cgc.manager.Services.TargetRuntime.StopPodSandbox(sandboxID); err != nil {
+				klog.Errorf("Failed to stop sandbox %q before removing: %v", sandboxID, err)
+				return
+			}
+			if err := cgc.manager.Services.TargetRuntime.RemovePodSandbox(sandboxID); err != nil {
+				klog.Errorf("Failed to remove sandbox %q: %v", sandboxID, err)
+			}
+		} else {
+			GcTargetRuntimeName := TargetRuntimeName
+			cgc.manager.Services.GcRuntimeName = GcTargetRuntimeName
+			cgc.manager.Services.GcRuntime = newInstrumentedRuntimeService(cgc.manager.Services.Service[GcTargetRuntimeName].Runtime)
+			cgc.manager.Services.GcImage = newInstrumentedImageManagerService(cgc.manager.Services.Service[GcTargetRuntimeName].Image)
+			klog.Infof("removeSandbox:PodSwitch of %s work", TargetRuntimeName)
+			if err := cgc.manager.Services.GcRuntime.StopPodSandbox(sandboxID); err != nil {
+				klog.Errorf("Failed to stop sandbox %q before removing: %v", sandboxID, err)
+				return
+			}
+			if err := cgc.manager.Services.GcRuntime.RemovePodSandbox(sandboxID); err != nil {
+				klog.Errorf("Failed to remove sandbox %q: %v", sandboxID, err)
+			}
+		}
+		delete(cgc.manager.Services.SidOfRuntime, sandboxID)
+		return
+	}
 	if err := cgc.client.StopPodSandbox(sandboxID); err != nil {
 		klog.Errorf("Failed to stop sandbox %q before removing: %v", sandboxID, err)
 		return

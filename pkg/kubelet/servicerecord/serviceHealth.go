@@ -8,7 +8,7 @@ import (
 
 // HealthStart return start boolean
 func (s *SockRecord) HealthStart() bool {
-	klog.Infof("HealthStart:Health check start!")
+	//klog.Infof("HealthStart:Health check start!")
 	duration := s.Period
 	go wait.Until(func() {
 		for runtimeSock := range s.Service {
@@ -30,7 +30,7 @@ func (s *SockRecord) HealthRestart(period metav1.Duration) bool {
 
 // HealthStop return stop boolean
 func (s *SockRecord) HealthStop() bool {
-	klog.Infof("HealthStart:Health check stop!")
+	//klog.Infof("HealthStart:Health check stop!")
 	s.StopCH <- struct{}{}
 	return true
 }

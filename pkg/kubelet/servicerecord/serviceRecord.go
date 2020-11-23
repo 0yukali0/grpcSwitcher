@@ -35,9 +35,13 @@ type SockRecord struct {
 	Period            metav1.Duration
 	StopCH            chan struct{}
 	PodSwitch         bool
+	SidOfRuntime      map[string]string
 	TargetRuntimeName string
 	TargetRuntime     internalapi.RuntimeService
 	TargetImage       internalapi.ImageManagerService
+	GcRuntimeName     string
+	GcRuntime         internalapi.RuntimeService
+	GcImage           internalapi.ImageManagerService
 }
 
 // NewSockRecord return *SockRecord
@@ -50,9 +54,11 @@ func NewSockRecord() (result *SockRecord) {
 		Period:            defaultDuration,
 		StopCH:            make(chan struct{}),
 		PodSwitch:         false,
+		SidOfRuntime:      make(map[string]string),
 		TargetRuntimeName: "",
+		GcRuntimeName:     "",
 	}
-	klog.Infof("NewSockRecord:Instance creates!")
+	//klog.Infof("NewSockRecord:Instance creates!")
 	// reload existed service
 	err := result.LoadService()
 	if err != nil {
@@ -68,7 +74,7 @@ func NewSockRecord() (result *SockRecord) {
 		klog.Infof("NewSockRecord:List of runtime exists!")
 	}
 	result.LoadDefaultSock()
-	klog.Infof("NewSockRecord:Health start!")
+	//klog.Infof("NewSockRecord:Health start!")
 	result.HealthStart()
 	return result
 }
@@ -79,10 +85,10 @@ func NewSockRecord() (result *SockRecord) {
 func (s *SockRecord) WrapRuntime(target string) (internalapi.RuntimeService, bool) {
 	_, _, err := s.GetImageAndRuntime(target, target, s.Period)
 	if err != nil {
-		klog.Infof("WrapRuntime:Service doesn't return!")
+		//klog.Infof("WrapRuntime:Service doesn't return!")
 		return nil, false
 	}
-	klog.Infof("WrapRuntime:Service exists and return!")
+	//klog.Infof("WrapRuntime:Service exists and return!")
 	tmp, flag := s.Service[target], true
 	return tmp.Runtime, flag
 }
@@ -93,10 +99,10 @@ func (s *SockRecord) WrapRuntime(target string) (internalapi.RuntimeService, boo
 func (s *SockRecord) WrapImage(target string) (internalapi.ImageManagerService, bool) {
 	_, _, err := s.GetImageAndRuntime(target, target, s.Period)
 	if err != nil {
-		klog.Infof("WrapImage:Service doesn't return!")
+		//klog.Infof("WrapImage:Service doesn't return!")
 		return nil, false
 	}
-	klog.Infof("WrapImage:Service exists and return!")
+	//klog.Infof("WrapImage:Service exists and return!")
 	tmp, flag := s.Service[target], true
 	return tmp.Image, flag
 }
@@ -106,11 +112,11 @@ func (s *SockRecord) WrapImage(target string) (internalapi.ImageManagerService, 
 // then repalce original period
 func (s *SockRecord) SetPeriod(period metav1.Duration) bool {
 	if s.Period.Duration < period.Duration {
-		klog.Infof("WrapImage:Period changes!")
+		//klog.Infof("WrapImage:Period changes!")
 		s.Period = period
 		return true
 	}
-	klog.Infof("WrapImage:Period doesn't change!")
+	//klog.Infof("WrapImage:Period doesn't change!")
 	return false
 }
 
@@ -123,11 +129,11 @@ func (s *SockRecord) GetImageAndRuntime(remoteRuntimeEndpoint string,
 	//For now,we
 	same := isSameSock(remoteRuntimeEndpoint, remoteImageEndpoint)
 	if !same {
-		klog.Infof("GetImageAndRuntime:Sockendpoints is different!")
+		//klog.Infof("GetImageAndRuntime:Sockendpoints is different!")
 		errMessage := "Failure:Sockendpoints is different."
 		return nil, nil, errors.New(errMessage)
 	}
-	klog.Infof("GetImageAndRuntime:Sockendpoints is same!")
+	//klog.Infof("GetImageAndRuntime:Sockendpoints is same!")
 	//Existed sock searching
 	requestSock := remoteRuntimeEndpoint
 	existed := s.IsExistedService(requestSock)
@@ -135,29 +141,29 @@ func (s *SockRecord) GetImageAndRuntime(remoteRuntimeEndpoint string,
 	if !existed {
 		rs, is, err := bothService(requestSock, runtimeRequestTimeout)
 		if err != nil {
-			klog.Infof("GetImageAndRuntime:GetBothService ERROR!")
+			//klog.Infof("GetImageAndRuntime:GetBothService ERROR!")
 			return nil, nil, err
 		}
 		s.addService(requestSock, rs, is, runtimeRequestTimeout)
 		return rs, is, nil
 	}
-	klog.Infof("GetImageAndRuntime:Service exists!")
+	//klog.Infof("GetImageAndRuntime:Service exists!")
 	//Timeout check
 	targetService := s.Service[requestSock]
 	active := targetService.Active
 	period := s.Period
 	ok := isLegelService(period, runtimeRequestTimeout, active)
 	if !ok {
-		klog.Infof("GetImageAndRuntime:Service doesn't satify requirement!")
+		//klog.Infof("GetImageAndRuntime:Service doesn't satify requirement!")
 		rs, is, err := bothService(requestSock, runtimeRequestTimeout)
 		if err != nil {
-			klog.Infof("GetImageAndRuntime:Service recreates fail!")
+			//klog.Infof("GetImageAndRuntime:Service recreates fail!")
 			return nil, nil, err
 		}
-		klog.Infof("GetImageAndRuntime:Service recreates!")
+		//klog.Infof("GetImageAndRuntime:Service recreates!")
 		s.addService(requestSock, rs, is, runtimeRequestTimeout)
 	}
-	klog.Infof("GetImageAndRuntime:Requirement of service is return!")
+	//klog.Infof("GetImageAndRuntime:Requirement of service is return!")
 	service := s.Service[requestSock]
 	return service.Runtime, service.Image, nil
 }
@@ -169,15 +175,15 @@ func (s *SockRecord) GetImageAndRuntime(remoteRuntimeEndpoint string,
 func bothService(runtimeName string, timeoutPeriod metav1.Duration) (internalapi.RuntimeService, internalapi.ImageManagerService, error) {
 	rs, err := remote.NewRemoteRuntimeService(runtimeName, timeoutPeriod.Duration)
 	if err != nil {
-		klog.Infof("bothService:Runtime client ERROR!")
+		//klog.Infof("bothService:Runtime client ERROR!")
 		return nil, nil, err
 	}
 	is, err := remote.NewRemoteImageService(runtimeName, timeoutPeriod.Duration)
 	if err != nil {
-		klog.Infof("bothService:Image client ERROR!")
+		//klog.Infof("bothService:Image client ERROR!")
 		return nil, nil, err
 	}
-	klog.Infof("bothService:Runtime and image client return!")
+	//klog.Infof("bothService:Runtime and image client return!")
 	return rs, is, nil
 }
 
@@ -188,7 +194,7 @@ func (s *SockRecord) addService(
 	runtime internalapi.RuntimeService,
 	image internalapi.ImageManagerService,
 	period metav1.Duration) {
-	klog.Infof("addService:Service add!")
+	//klog.Infof("addService:Service add!")
 	t := time.Now()
 	s.Sock = append(s.Sock, sock)
 	result := GrpcResult{

@@ -4,7 +4,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog"
 )
 
 // isLegelService return boolean of legal service
@@ -19,10 +18,10 @@ func isLegelService(period, request metav1.Duration, active time.Time) bool {
 	deadline := active.Add(period.Duration)
 	diff := deadline.Sub(except)
 	if diff >= 0 {
-		klog.Infof("isLegelService:Period is legal!")
+		//klog.Infof("isLegelService:Period is legal!")
 		return true
 	}
-	klog.Infof("isLegelService:Period is illegal!")
+	//klog.Infof("isLegelService:Period is illegal!")
 	return false
 }
 
@@ -30,10 +29,10 @@ func isLegelService(period, request metav1.Duration, active time.Time) bool {
 // Socks should be same
 func isSameSock(runtimeEndpoint string, imageEndpoint string) bool {
 	if runtimeEndpoint == imageEndpoint {
-		klog.Infof("isSameSock:Socks are same!")
+		//klog.Infof("isSameSock:Socks are same!")
 		return true
 	}
-	klog.Infof("isSameSock:Socks are different!")
+	//klog.Infof("isSameSock:Socks are different!")
 	return false
 }
 
@@ -43,10 +42,10 @@ func (s *SockRecord) IsExistedService(remoteRuntimeEndpoint string) bool {
 	var sock string
 	for _, sock = range s.Sock {
 		if sock == remoteRuntimeEndpoint {
-			klog.Infof("IsExistedService:Service exists!")
+			//klog.Infof("IsExistedService:Service exists!")
 			return true
 		}
 	}
-	klog.Infof("IsExistedService:Service doesn't exist!")
+	//klog.Infof("IsExistedService:Service doesn't exist!")
 	return false
 }
